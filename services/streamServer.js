@@ -12,6 +12,17 @@ class StreamServer {
         this.connections = new Map();
         this.ucidToConnection = new Map(); // Map UCID to WebSocket connection
         this.server = server;
+        this.recentRejections = new Map(); // Track rejections for rate limiting
+        
+        // Clean up old rejection logs every 5 minutes
+        setInterval(() => {
+            const now = Date.now();
+            for (const [ip, timestamp] of this.recentRejections.entries()) {
+                if (now - timestamp > 300000) { // 5 minutes
+                    this.recentRejections.delete(ip);
+                }
+            }
+        }, 300000);
         
         console.log('[StreamServer] Creating WebSocket.Server with noServer mode');
         
@@ -29,9 +40,24 @@ class StreamServer {
             console.log('[StreamServer] Request URL:', request.url);
             console.log('[StreamServer] Request headers:', request.headers);
             
-            // Only handle /ws path
+            // Only handle /ws path - reject others silently to reduce log noise
             if (request.url !== '/ws') {
-                console.log('[StreamServer] ❌ Destroying socket - not /ws path:', request.url);
+                // Log only unique IPs to reduce spam (rate limit logging)
+                const clientIP = request.headers['x-forwarded-for'] || 
+                              request.headers['x-real-ip'] || 
+                              request.connection.remoteAddress || 
+                              'unknown';
+                
+                if (!this.recentRejections) this.recentRejections = new Map();
+                const now = Date.now();
+                const lastLog = this.recentRejections.get(clientIP);
+                
+                // Only log once per IP per minute to reduce noise
+                if (!lastLog || (now - lastLog) > 60000) {
+                    console.log(`[StreamServer] ❌ WebSocket rejected - IP: ${clientIP}, path: ${request.url}`);
+                    this.recentRejections.set(clientIP, now);
+                }
+                
                 socket.destroy();
                 return;
             }

@@ -17,7 +17,6 @@ class IVRFlow {
      * @returns {string} WebSocket URL
      */
     getWebSocketUrl() {
-        return "ws://voxflow-production.up.railway.app/ws";
         // For production deployment at realway.com
         if (process.env.NODE_ENV === 'production') {
             // Check if running on Railway or other cloud platform
@@ -32,10 +31,7 @@ class IVRFlow {
         }
         
         // For development
-        return (
-          process.env.STREAM_WS_URL ||
-          "ws://voxflow-production.up.railway.app/ws"
-        );
+        return process.env.STREAM_WS_URL || 'ws://localhost:3000/ws';
     }
 
     /**

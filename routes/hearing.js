@@ -1186,21 +1186,47 @@ const streamingClient = new StreamingClient({
     minSpeechDuration: parseInt(process.env.MIN_SPEECH_DURATION) || 1500
 });
 
-// Initialize stream client on module load
-streamClient.initialize().catch(err => {
-    logger.error('Failed to initialize stream client', { error: err.message });
-});
+// Only auto-initialize in development or when explicitly enabled
+// In production, initialization should be triggered by actual API calls
+if (process.env.NODE_ENV !== 'production' || process.env.AUTO_INIT_STREAM_CLIENTS === 'true') {
+    // Initialize stream client on module load
+    streamClient.initialize().catch(err => {
+        logger.error('Failed to initialize stream client', { error: err.message });
+    });
 
-// Initialize streaming client on module load
-streamingClient.initialize().catch(err => {
-    logger.error('Failed to initialize streaming client', { error: err.message });
-});
+    // Initialize streaming client on module load
+    streamingClient.initialize().catch(err => {
+        logger.error('Failed to initialize streaming client', { error: err.message });
+    });
+} else {
+    logger.info('Stream clients created but not auto-initialized in production mode');
+}
+
+// Helper function to ensure clients are initialized when needed
+async function ensureClientsInitialized() {
+    if (!streamClient.isConnected) {
+        logger.info('Lazy initializing stream client...');
+        await streamClient.initialize().catch(err => {
+            logger.error('Failed to lazy initialize stream client', { error: err.message });
+        });
+    }
+    
+    if (!streamingClient.isConnected) {
+        logger.info('Lazy initializing streaming client...');
+        await streamingClient.initialize().catch(err => {
+            logger.error('Failed to lazy initialize streaming client', { error: err.message });
+        });
+    }
+}
 
 // API Routes
 
 // Get hearing status and stream connection info
-router.get('/', (req, res) => {
+router.get('/', async (req, res) => {
     try {
+        // Ensure clients are initialized if needed
+        await ensureClientsInitialized();
+        
         const status = streamClient.getStatus();
         const streamingStatus = streamingClient.getStatus();
         const hearingInfo = {
