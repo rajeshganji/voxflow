@@ -10,7 +10,6 @@ const router = express.Router();
  */
 router.all('/', (req, res) => {
     const startTime = Date.now();
-    const requestId = req.headers['x-request-id'] || `ivr_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     
     try {
         // Extract parameters from query string or body
@@ -23,25 +22,10 @@ router.all('/', (req, res) => {
             phone_no: req.query.phone_no || req.body?.phone_no || ''
         };
 
-        logger.info('IVR Flow request received', {
-            component: 'IVRRoutes',
-            requestId,
-            method: req.method,
-            path: req.path,
-            params,
-            headers: {
-                'user-agent': req.get('User-Agent'),
-                'content-type': req.get('Content-Type'),
-                'x-forwarded-for': req.get('X-Forwarded-For')
-            },
-            ip: req.ip || req.connection.remoteAddress,
-            query: req.query,
-            body: req.body
-        });
+        console.log(`📞 [IVR-REQUEST] SID:${params.sid} Event:${params.event} Data:${params.data} From:${params.caller_id}`);
 
         logger.info('[IVR] Processing flow request', {
             component: 'IVRRoutes',
-            requestId,
             sid: params.sid,
             event: params.event,
             data: params.data,
@@ -57,35 +41,23 @@ router.all('/', (req, res) => {
         const xmlResponse = response.getXML();
         const processingTime = Date.now() - startTime;
         
-        logger.ivrResponse(params.sid, params.event, xmlResponse, processingTime);
+        console.log(`✅ [IVR-RESPONSE] SID:${params.sid} Time:${processingTime}ms`);
+        console.log(`📄 [XML-RESPONSE]\n${xmlResponse}`);
         
-        logger.info('[IVR] Generated XML response', {
-            component: 'IVRRoutes',
-            requestId,
-            sid: params.sid,
-            event: params.event,
-            processingTimeMs: processingTime,
-            responseLength: xmlResponse.length,
-            xml: xmlResponse
-        });
+        logger.ivrResponse(params.sid, params.event, xmlResponse, processingTime);
 
         // Send XML response
-        logger.info('Sending IVR response to client', {
-            component: 'IVRRoutes',
-            requestId,
-            sid: params.sid,
-            statusCode: 200,
-            contentType: 'application/xml'
-        });
+        console.log(`📤 [IVR-SEND] SID:${params.sid} Sending XML response`);
         
         response.send(res);
 
     } catch (error) {
         const processingTime = Date.now() - startTime;
         
+        console.error(`❌ [IVR-ERROR] ${error.message} (${processingTime}ms)`);
+        
         logger.error('[IVR] Error processing flow', {
             component: 'IVRRoutes',
-            requestId,
             error: error.message,
             stack: error.stack,
             params: req.query,
@@ -99,13 +71,8 @@ router.all('/', (req, res) => {
         errorResponse.addHangup();
         
         const errorXml = errorResponse.getXML();
-        logger.info('Sending error response to client', {
-            component: 'IVRRoutes',
-            requestId,
-            statusCode: 500,
-            errorXml,
-            processingTimeMs: processingTime
-        });
+        console.log(`📄 [ERROR-XML]\n${errorXml}`);
+        
         errorResponse.send(res);
     }
 });

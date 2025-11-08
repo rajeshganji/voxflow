@@ -14,7 +14,6 @@ const ivrExecuterRoutes = require('./routes/ivrexecuter');
 const hearingRoutes = require('./routes/hearing');
 const flowViewRoutes = require('./routes/flowview');
 const ivrFlowRoutes = require('./routes/ivrflow');
-const monitoringRoutes = require('./routes/monitoring');
 
 // Import logger and StreamServer
 const logger = require('./utils/logger');
@@ -71,33 +70,17 @@ app.use(express.urlencoded({ extended: true }));
 // Serve static files
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Logging middleware for all requests
+// Simple logging middleware for all requests
 app.use((req, res, next) => {
   const startTime = Date.now();
-  const requestId = req.headers['x-request-id'] || `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
   
-  req.requestId = requestId;
-  req.startTime = startTime;
+  console.log(`🌐 [${req.method}] ${req.originalUrl} - ${req.ip || req.connection.remoteAddress}`);
   
-  logger.apiCall(req.method, req.originalUrl, req.query, {}, 0, 0);
-  logger.info(`${req.method} ${req.url}`, {
-    component: 'Server',
-    requestId,
-    ip: req.ip,
-    userAgent: req.get('User-Agent'),
-    contentType: req.get('Content-Type'),
-    xForwardedFor: req.get('X-Forwarded-For')
-  });
-  
-  // Override res.json to log responses
+  // Override res.json to log response timing
   const originalJson = res.json;
   res.json = function(body) {
     const duration = Date.now() - startTime;
-    logger.apiCall(req.method, req.originalUrl, req.query, body, res.statusCode, duration);
-    logger.performance('Server', `${req.method} ${req.originalUrl}`, duration, {
-      requestId,
-      statusCode: res.statusCode
-    });
+    console.log(`✅ [${req.method}] ${req.originalUrl} - ${res.statusCode} (${duration}ms)`);
     originalJson.call(this, body);
   };
   
@@ -109,7 +92,6 @@ app.use('/api/designer', designerRoutes);
 app.use('/api/ivrexecuter', ivrExecuterRoutes);
 app.use('/api/hearing', hearingRoutes);
 app.use('/api/ivrflow', ivrFlowRoutes);
-app.use('/api/monitoring', monitoringRoutes);
 app.use('/flowJsonView', flowViewRoutes);
 
 // Root route
