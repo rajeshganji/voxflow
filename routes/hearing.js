@@ -295,6 +295,13 @@ class StreamClient {
             } else if (this.currentCall.mediaPackets % 10 === 0) {
                 console.log(`📊 [TRANSCRIPTION-STATUS] UCID: ${ucid}, packet #${this.currentCall.mediaPackets}, next trigger at: ${Math.ceil(this.currentCall.mediaPackets / 50) * 50}`);
             }
+            
+            // Enhanced debugging for transcription triggers
+            if (this.currentCall.mediaPackets % 50 === 0) {
+                const sum = samples.reduce((acc, s) => acc + (s * s), 0);
+                const rms = Math.sqrt(sum / samples.length);
+                console.log(`🔍 [TRANSCRIPTION-DEBUG] Packet #${this.currentCall.mediaPackets}: samples=${samples.length}, RMS=${rms.toFixed(2)}, threshold=300`);
+            }
 
             // Log every 100th packet
             if (this.currentCall.mediaPackets % 100 === 0) {
@@ -326,12 +333,19 @@ class StreamClient {
      */
     async processAudioForTranscription(ucid, samples, sampleRate) {
         const session = this.transcriptionSessions.get(ucid);
-        if (!session || this.transcriptionInProgress.get(ucid)) {
+        if (!session) {
+            console.log(`❌ [TRANSCRIPTION] No session found for UCID: ${ucid}`);
+            return;
+        }
+        
+        if (this.transcriptionInProgress.get(ucid)) {
+            console.log(`⏳ [TRANSCRIPTION] Already in progress for UCID: ${ucid}`);
             return;
         }
 
         try {
             this.transcriptionInProgress.set(ucid, true);
+            console.log(`🔄 [TRANSCRIPTION] Starting processing for UCID: ${ucid}`);
             
             // Audio energy analysis for speech detection
             const sum = samples.reduce((acc, s) => acc + (s * s), 0);
