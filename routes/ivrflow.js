@@ -9,6 +9,9 @@ const router = express.Router();
  * Processes incoming KooKoo requests and returns XML responses
  */
 router.all('/', (req, res) => {
+    const startTime = Date.now();
+    const requestId = req.headers['x-request-id'] || `ivr_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    
     try {
         // Extract parameters from query string or body
         const params = {
@@ -20,7 +23,25 @@ router.all('/', (req, res) => {
             phone_no: req.query.phone_no || req.body?.phone_no || ''
         };
 
+        logger.info('IVR Flow request received', {
+            component: 'IVRRoutes',
+            requestId,
+            method: req.method,
+            path: req.path,
+            params,
+            headers: {
+                'user-agent': req.get('User-Agent'),
+                'content-type': req.get('Content-Type'),
+                'x-forwarded-for': req.get('X-Forwarded-For')
+            },
+            ip: req.ip || req.connection.remoteAddress,
+            query: req.query,
+            body: req.body
+        });
+
         logger.info('[IVR] Processing flow request', {
+            component: 'IVRRoutes',
+            requestId,
             sid: params.sid,
             event: params.event,
             data: params.data,
@@ -34,25 +55,57 @@ router.all('/', (req, res) => {
 
         // Log the XML response for debugging
         const xmlResponse = response.getXML();
+        const processingTime = Date.now() - startTime;
+        
+        logger.ivrResponse(params.sid, params.event, xmlResponse, processingTime);
+        
         logger.info('[IVR] Generated XML response', {
+            component: 'IVRRoutes',
+            requestId,
             sid: params.sid,
+            event: params.event,
+            processingTimeMs: processingTime,
+            responseLength: xmlResponse.length,
             xml: xmlResponse
         });
 
         // Send XML response
+        logger.info('Sending IVR response to client', {
+            component: 'IVRRoutes',
+            requestId,
+            sid: params.sid,
+            statusCode: 200,
+            contentType: 'application/xml'
+        });
+        
         response.send(res);
 
     } catch (error) {
+        const processingTime = Date.now() - startTime;
+        
         logger.error('[IVR] Error processing flow', {
+            component: 'IVRRoutes',
+            requestId,
             error: error.message,
             stack: error.stack,
-            params: req.query
+            params: req.query,
+            body: req.body,
+            processingTimeMs: processingTime
         });
 
         // Send error response
         const errorResponse = new Response();
         errorResponse.addPlayText('Sorry, an error occurred. Please try again later.', 3);
         errorResponse.addHangup();
+        
+        const errorXml = errorResponse.getXML();
+        logger.info('Sending error response to client', {
+            component: 'IVRRoutes',
+            requestId,
+            statusCode: 500,
+            errorXml,
+            processingTimeMs: processingTime
+        });
         errorResponse.send(res);
     }
 });

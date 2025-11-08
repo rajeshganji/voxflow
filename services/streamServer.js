@@ -4,9 +4,15 @@
  */
 
 const WebSocket = require('ws');
+const logger = require('../utils/logger');
 
 class StreamServer {
     constructor(server, streamClient) {
+        logger.info('StreamServer constructor called', {
+            component: 'StreamServer',
+            action: 'INITIALIZATION'
+        });
+        
         console.log('[StreamServer] 🚀 CONSTRUCTOR CALLED - Initializing...');
         this.streamClient = streamClient;
         this.connections = new Map();
@@ -36,6 +42,19 @@ class StreamServer {
         
         // Manually handle upgrade requests BEFORE Express middleware
         this.server.on('upgrade', (request, socket, head) => {
+            const connectionId = `conn_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+            const clientIP = request.headers['x-forwarded-for'] || 
+                           request.headers['x-real-ip'] || 
+                           request.connection.remoteAddress || 
+                           'unknown';
+
+            logger.wsConnection('UPGRADE_REQUEST', connectionId, {
+                url: request.url,
+                clientIP,
+                headers: request.headers,
+                userAgent: request.headers['user-agent']
+            });
+
             console.log('[StreamServer] 📡 UPGRADE EVENT RECEIVED!');
             console.log('[StreamServer] Request URL:', request.url);
             console.log('[StreamServer] Request headers:', request.headers);
@@ -43,10 +62,6 @@ class StreamServer {
             // Only handle /ws path - reject others silently to reduce log noise
             if (request.url !== '/ws') {
                 // Log only unique IPs to reduce spam (rate limit logging)
-                const clientIP = request.headers['x-forwarded-for'] || 
-                              request.headers['x-real-ip'] || 
-                              request.connection.remoteAddress || 
-                              'unknown';
                 
                 if (!this.recentRejections) this.recentRejections = new Map();
                 const now = Date.now();
@@ -55,16 +70,26 @@ class StreamServer {
                 // Only log once per IP per minute to reduce noise
                 if (!lastLog || (now - lastLog) > 60000) {
                     console.log(`[StreamServer] ❌ WebSocket rejected - IP: ${clientIP}, path: ${request.url}`);
+                    logger.wsConnection('REJECTED', connectionId, {
+                        reason: 'INVALID_PATH',
+                        requestedPath: request.url,
+                        expectedPath: '/ws',
+                        clientIP,
+                        userAgent: request.headers['user-agent']
+                    });
                     this.recentRejections.set(clientIP, now);
                 }
                 
                 socket.destroy();
                 return;
             }
-            
-            console.log('[StreamServer] ✅ Handling upgrade for /ws');
-            
-            this.wss.handleUpgrade(request, socket, head, (ws) => {
+
+            logger.wsConnection('UPGRADE_ACCEPTED', connectionId, {
+                path: request.url,
+                clientIP
+            });
+
+            console.log('[StreamServer] ✅ Handling upgrade for /ws');            this.wss.handleUpgrade(request, socket, head, (ws) => {
                 console.log('[StreamServer] 🎯 handleUpgrade callback - emitting connection');
                 this.wss.emit('connection', ws, request);
             });

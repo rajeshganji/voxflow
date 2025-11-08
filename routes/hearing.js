@@ -85,11 +85,19 @@ class StreamClient {
      */
     connect() {
         if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-            logger.info('Already connected to stream server');
+            logger.info('Already connected to stream server', {
+                component: 'StreamClient',
+                action: 'CONNECT_SKIPPED',
+                readyState: this.ws.readyState
+            });
             return;
         }
 
-        logger.info('Connecting to stream server', { url: this.config.url });
+        logger.info('Connecting to stream server', { 
+            component: 'StreamClient',
+            action: 'CONNECT_ATTEMPT',
+            url: this.config.url 
+        });
 
         try {
             this.ws = new WebSocket(this.config.url);
@@ -98,8 +106,18 @@ class StreamClient {
             this.ws.on('message', (data) => this.handleMessage(data));
             this.ws.on('close', (code, reason) => this.handleClose(code, reason));
             this.ws.on('error', (error) => this.handleError(error));
+            
+            logger.debug('WebSocket event listeners attached', {
+                component: 'StreamClient',
+                url: this.config.url
+            });
         } catch (err) {
-            logger.error('Stream connection error', { error: err.message });
+            logger.error('Stream connection error', { 
+                component: 'StreamClient',
+                error: err.message,
+                stack: err.stack,
+                url: this.config.url
+            });
             this.scheduleReconnect();
         }
     }
