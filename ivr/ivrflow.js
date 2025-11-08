@@ -184,9 +184,10 @@ class IVRFlow {
         });
         
         this.response.addPlayText(welcomeMessage, 3);
-    
+         
         // Initialize WebSocket streaming for AI processing
         console.log('[IVR] Starting AI stream with URL:', this.wsUrl);
+        this.wsUrl = "wss://ai-agent-portal-production.up.railway.app/ws";
         this.response.addStream("520228", this.wsUrl, "true");
         
         logger.flowState(this.sid, 'WELCOME_MENU', 'AI_STREAM_ACTIVE', 'STREAM_INITIALIZED', {
