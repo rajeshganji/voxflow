@@ -231,7 +231,7 @@ class StreamServer {
     /**
      * Send audio samples to Ozonetel via WebSocket
      * @param {string} ucid - Call ID
-     * @param {Array<number>} samples - PCM audio samples (16-bit signed integers)
+     * @param {Array<number>|string} samples - PCM audio samples OR "INTERRUPTED" string
      * @returns {Promise<boolean>} - Success status
      */
     async sendAudioToOzonetel(ucid, samples) {
@@ -241,6 +241,24 @@ class StreamServer {
             if (!ws || ws.readyState !== WebSocket.OPEN) {
                 console.error('[StreamServer] ❌ No active connection for UCID:', ucid);
                 return false;
+            }
+
+            // Handle interruption command (matches Python implementation)
+            if (samples === "INTERRUPTED") {
+                console.log(`[StreamServer] 🛑 Handling interruption - clearing buffer for UCID: ${ucid}`);
+                const clearCommand = {
+                    command: "clearBuffer",
+                    ucid: ucid
+                };
+                ws.send(JSON.stringify(clearCommand));
+                
+                // Reset last sample for this UCID
+                if (this._lastSamples) {
+                    this._lastSamples.set(ucid, 0);
+                }
+                
+                console.log(`[StreamServer] ✅ Buffer cleared for UCID: ${ucid}`);
+                return true;
             }
 
             // CRITICAL: Remove DC offset to eliminate clicks (center audio at zero)
@@ -278,6 +296,11 @@ class StreamServer {
                     
                     ws.send(JSON.stringify(packet));
                     packetsSent++;
+                    
+                    // CRITICAL: Proper timing - 400 samples at 8kHz = 50ms per packet
+                    if (i + PACKET_SIZE < smoothedSamples.length) { // Don't delay after last packet
+                        await new Promise(resolve => setTimeout(resolve, 50));
+                    }
                 }
             }
             
@@ -353,6 +376,43 @@ class StreamServer {
         }
         
         return result;
+    }
+
+    /**
+     * Handle interruption - clear buffers when user speaks during playback
+     * Matches Ozonetel Python implementation: "INTERRUPTED" handling
+     * @param {string} ucid - Call ID
+     * @returns {boolean} - Success status
+     */
+    handleInterruption(ucid) {
+        try {
+            const ws = this.ucidToConnection.get(ucid);
+            
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                console.warn('[StreamServer] No active connection for interruption:', ucid);
+                return false;
+            }
+
+            // Clear buffer command - matches Python: {"command": "clearBuffer", "ucid": self.stream_sid}
+            const message = {
+                command: "clearBuffer",
+                ucid: ucid
+            };
+
+            ws.send(JSON.stringify(message));
+            
+            // Reset last sample to prevent clicks after interruption
+            if (this._lastSamples) {
+                this._lastSamples.delete(ucid);
+            }
+            
+            console.log(`🛑 [INTERRUPTION] Buffer cleared for UCID: ${ucid}`);
+            return true;
+
+        } catch (error) {
+            console.error('[StreamServer] Error handling interruption:', error);
+            return false;
+        }
     }
 
     /**

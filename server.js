@@ -46,6 +46,9 @@ const { streamClient } = require('./routes/hearing');
 // Create StreamServer for handling Ozonetel stream connections
 const streamServer = new StreamServer(server, streamClient, null);
 
+// Make StreamServer globally accessible for audio playback
+global.streamServer = streamServer;
+
 // Middleware
 app.use(helmet({
   contentSecurityPolicy: {

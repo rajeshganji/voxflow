@@ -702,7 +702,33 @@ class StreamClient {
     }
 
     /**
-     * Send audio data back to server
+     * Send audio for playback to Ozonetel (uses StreamServer for proper audio processing)
+     * @param {string} ucid - Call ID
+     * @param {Array<number>|string} samples - PCM audio samples or "INTERRUPTED" for buffer clear
+     * @returns {Promise<boolean>} - Success status
+     */
+    async sendAudioPlayback(ucid, samples) {
+        try {
+            // Import StreamServer to get access to sendAudioToOzonetel
+            const streamServer = require('../services/streamServer');
+            
+            // If there's a global streamServer instance, use it
+            if (global.streamServer && global.streamServer.sendAudioToOzonetel) {
+                console.log(`🎵 [PLAYBACK] Sending ${samples === "INTERRUPTED" ? "INTERRUPT" : samples.length + " samples"} to UCID: ${ucid}`);
+                return await global.streamServer.sendAudioToOzonetel(ucid, samples);
+            } else {
+                console.warn(`⚠️ [PLAYBACK] StreamServer not available for UCID: ${ucid}`);
+                return false;
+            }
+        } catch (error) {
+            console.error(`❌ [PLAYBACK] Error sending audio for UCID: ${ucid}: ${error.message}`);
+            logger.error('Audio playback error', { ucid, error: error.message });
+            return false;
+        }
+    }
+
+    /**
+     * Send audio data back to server (legacy method for basic sending)
      */
     sendAudio(ucid, audioData) {
         if (!this.isConnected || !this.ws) {
@@ -1503,6 +1529,8 @@ router.get('/', async (req, res) => {
                 status: '/api/hearing/status',
                 language: '/api/hearing/language/:ucid/:language',
                 sendAudio: '/api/hearing/audio/:ucid',
+                playbackAudio: '/api/hearing/playback/:ucid',
+                interruptPlayback: '/api/hearing/interrupt/:ucid',
                 clearBuffer: '/api/hearing/clear',
                 disconnect: '/api/hearing/disconnect',
                 streamingStart: '/api/hearing/streaming/start',
@@ -1622,6 +1650,54 @@ router.post('/audio/:ucid', (req, res) => {
     }
 });
 
+// Send playback audio to Ozonetel (with click elimination)
+router.post('/playback/:ucid', async (req, res) => {
+    try {
+        const { ucid } = req.params;
+        const { samples } = req.body;
+        
+        if (!ucid) {
+            return res.status(400).json({
+                success: false,
+                error: 'UCID is required'
+            });
+        }
+        
+        if (!samples || !Array.isArray(samples)) {
+            return res.status(400).json({
+                success: false,
+                error: 'Invalid audio data - samples array required'
+            });
+        }
+
+        // Use StreamClient's playback method which handles Ozonetel properly
+        const result = await streamClient.sendAudioPlayback(ucid, samples);
+        
+        if (result) {
+            res.json({
+                success: true,
+                ucid,
+                samplesCount: samples.length,
+                message: 'Audio playback sent successfully (with click elimination)'
+            });
+        } else {
+            res.status(500).json({
+                success: false,
+                error: 'Failed to send playback audio'
+            });
+        }
+        
+        logger.info('Audio playback API call', { ucid, samplesCount: samples.length, result });
+    } catch (error) {
+        logger.error('Error in audio playback API', { error: error.message });
+        res.status(500).json({ 
+            success: false,
+            error: 'Failed to process playback audio',
+            message: error.message 
+        });
+    }
+});
+
 // Clear audio buffer
 router.post('/clear', (req, res) => {
     try {
@@ -1645,6 +1721,52 @@ router.post('/clear', (req, res) => {
         res.status(500).json({ 
             success: false,
             error: 'Failed to clear buffer',
+            message: error.message 
+        });
+    }
+});
+
+// Handle interruption (clear buffer when user speaks during playback)
+router.post('/interrupt/:ucid', (req, res) => {
+    try {
+        const { ucid } = req.params;
+        
+        if (!ucid) {
+            return res.status(400).json({
+                success: false,
+                error: 'UCID is required'
+            });
+        }
+
+        let result = false;
+        
+        // Use global streamServer if available (matches Ozonetel interruption handling)
+        if (global.streamServer && global.streamServer.handleInterruption) {
+            result = global.streamServer.handleInterruption(ucid);
+        } else {
+            // Fallback to streamClient clearBuffer
+            result = streamClient.clearBuffer();
+        }
+        
+        if (result) {
+            res.json({
+                success: true,
+                ucid,
+                message: 'Interruption handled - buffer cleared successfully'
+            });
+        } else {
+            res.status(500).json({
+                success: false,
+                error: 'Failed to handle interruption'
+            });
+        }
+        
+        logger.info('Interruption handled', { ucid, result });
+    } catch (error) {
+        logger.error('Error handling interruption', { error: error.message });
+        res.status(500).json({ 
+            success: false,
+            error: 'Failed to handle interruption',
             message: error.message 
         });
     }
