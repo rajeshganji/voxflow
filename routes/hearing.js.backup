@@ -45,15 +45,7 @@ class StreamClient {
         logger.info('StreamClient initialized', {
             url: this.config.url,
             reconnectInterval: this.config.reconnectInterval,
-            logDir: this.config.logDir,
-            openAIEnabled: openaiService.enabled || false
-        });
-        
-        console.log('🚀 [STREAM-CLIENT] Initialized with config:', {
-            url: this.config.url,
-            reconnectInterval: this.config.reconnectInterval,
-            logDir: this.config.logDir,
-            openAIEnabled: openaiService.enabled || false
+            logDir: this.config.logDir
         });
     }
 
@@ -169,13 +161,6 @@ class StreamClient {
     }
 
     /**
-     * Process message (called directly by StreamServer) - for server mode compatibility
-     */
-    async processMessage(data) {
-        await this.handleMessage(data);
-    }
-
-    /**
      * Handle call start event
      */
     async handleStartEvent(message) {
@@ -226,22 +211,11 @@ class StreamClient {
         const { ucid, data } = message;
         
         console.log(`🎵 [MEDIA-EVENT] UCID: ${ucid}, frames: ${data?.numberOfFrames}, rate: ${data?.sampleRate}Hz`);
-        console.log(`🔍 [DEBUG] Current call: ${this.currentCall?.ucid}, Session exists: ${this.transcriptionSessions.has(ucid)}, Processor exists: ${this.audioProcessors.has(ucid)}`);
 
         if (!this.currentCall || this.currentCall.ucid !== ucid) {
             console.warn(`⚠️ [MEDIA-EVENT] Received media for unknown call: ${ucid}, current call: ${this.currentCall?.ucid}`);
-            // Auto-create session if missing (for cases where START event was missed)
-            if (!this.transcriptionSessions.has(ucid)) {
-                console.log(`🔧 [AUTO-RECOVERY] Creating missing session for UCID: ${ucid}`);
-                this.currentCall = {
-                    ucid,
-                    did: 'unknown',
-                    startTime: new Date().toISOString(),
-                    mediaPackets: 0,
-                    firstMediaReceived: false
-                };
-                await this.handleStartEvent({ ucid, did: 'unknown' });
-            }
+            logger.warn('Received media for unknown call', { ucid });
+            return;
         }
 
         const { samples, bitsPerSample, sampleRate, channelCount, numberOfFrames, type } = data;
@@ -280,10 +254,8 @@ class StreamClient {
 
             // Process audio for transcription periodically
             if (this.currentCall.mediaPackets % 50 === 0 && samples && samples.length > 0) {
-                console.log(`🎤 [TRANSCRIPTION-TRIGGER] Processing audio for UCID: ${ucid}, packet #${this.currentCall.mediaPackets}, samples: ${samples.length}`);
+                console.log(`🎤 [TRANSCRIPTION] Processing audio for UCID: ${ucid}, packet #${this.currentCall.mediaPackets}`);
                 await this.processAudioForTranscription(ucid, samples, sampleRate);
-            } else if (this.currentCall.mediaPackets % 10 === 0) {
-                console.log(`📊 [TRANSCRIPTION-STATUS] UCID: ${ucid}, packet #${this.currentCall.mediaPackets}, next trigger at: ${Math.ceil(this.currentCall.mediaPackets / 50) * 50}`);
             }
 
             // Log every 100th packet

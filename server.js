@@ -40,11 +40,11 @@ const port = process.env.PORT || defaultPort;
 // Create HTTP server
 const server = http.createServer(app);
 
-// Import stream client for StreamServer integration
+// Import stream clients for StreamServer integration
 const { streamClient } = require('./routes/hearing');
 
 // Create StreamServer for handling Ozonetel stream connections
-const streamServer = new StreamServer(server, streamClient);
+const streamServer = new StreamServer(server, streamClient, null);
 
 // Middleware
 app.use(helmet({

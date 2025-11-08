@@ -7,14 +7,17 @@ const WebSocket = require('ws');
 const logger = require('../utils/logger');
 
 class StreamServer {
-    constructor(server, streamClient) {
+    constructor(server, streamClient, streamingClient) {
         logger.info('StreamServer constructor called', {
             component: 'StreamServer',
-            action: 'INITIALIZATION'
+            action: 'INITIALIZATION',
+            hasStreamClient: !!streamClient,
+            hasStreamingClient: !!streamingClient
         });
         
         console.log('[StreamServer] 🚀 CONSTRUCTOR CALLED - Initializing...');
         this.streamClient = streamClient;
+        this.streamingClient = streamingClient || null; // Optional real-time transcription client
         this.connections = new Map();
         this.ucidToConnection = new Map(); // Map UCID to WebSocket connection
         this.server = server;
@@ -386,7 +389,7 @@ class StreamServer {
         }
     }
 
-    handleMessage(ws, data, connectionId) {
+    async handleMessage(ws, data, connectionId) {
         try {
             const message = JSON.parse(data.toString());
             
@@ -434,13 +437,29 @@ class StreamServer {
                 console.log(`[StreamServer] Event: ${message.event || message.type}, UCID: ${message.ucid}`);
             }
 
-            // Forward to StreamClient message handler
+            // Forward to both StreamClient and StreamingClient for parallel processing
+            let forwardedCount = 0;
+            
+            // Forward to StreamClient (basic logging and storage)
             if (this.streamClient) {
                 console.log(`🔄 [STREAM-FORWARD] Forwarding ${message.event || 'unknown'} event to StreamClient`);
-                this.streamClient.handleMessage(data);
+                this.streamClient.processMessage(data);
                 console.log(`✅ [STREAM-FORWARD] Message forwarded to StreamClient successfully`);
+                forwardedCount++;
+            }
+            
+            // Forward to StreamingClient (real-time transcription and playback) - Optional
+            if (this.streamingClient) {
+                console.log(`🔄 [STREAMING-FORWARD] Forwarding ${message.event || 'unknown'} event to StreamingClient for real-time processing`);
+                this.streamingClient.processMessage(data);
+                console.log(`✅ [STREAMING-FORWARD] Message forwarded to StreamingClient successfully`);
+                forwardedCount++;
+            }
+            
+            if (forwardedCount === 0) {
+                console.warn('⚠️ [MESSAGE-FORWARD] No clients available to handle message!');
             } else {
-                console.warn('⚠️ [STREAM-FORWARD] No StreamClient available to handle message!');
+                console.log(`📊 [MESSAGE-FORWARD] Message forwarded to ${forwardedCount} client(s)`);
             }
 
         } catch (err) {
