@@ -64,7 +64,7 @@ document.addEventListener('DOMContentLoaded', function() {
 function initWebSocket() {
     voxLogger.info('Initializing WebSocket connection');
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${window.location.host}`;
+    const wsUrl = `${protocol}//${window.location.host}/ws`;
     voxLogger.debug('WebSocket URL:', wsUrl);
     
     ws = new WebSocket(wsUrl);

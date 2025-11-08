@@ -74,7 +74,7 @@ function setupEventListeners() {
 function initWebSocket() {
     console.log('Initializing WebSocket connection');
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${window.location.host}`;
+    const wsUrl = `${protocol}//${window.location.host}/ws`;
     console.log('WebSocket URL:', wsUrl);
     
     ws = new WebSocket(wsUrl);
