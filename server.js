@@ -1,3 +1,6 @@
+// Load environment variables
+require('dotenv').config();
+
 const express = require('express');
 const WebSocket = require('ws');
 const http = require('http');
@@ -11,8 +14,9 @@ const ivrExecuterRoutes = require('./routes/ivrexecuter');
 const hearingRoutes = require('./routes/hearing');
 const flowViewRoutes = require('./routes/flowview');
 
-// Import logger
+// Import logger and StreamServer
 const logger = require('./utils/logger');
+const StreamServer = require('./services/streamServer');
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -20,8 +24,11 @@ const port = process.env.PORT || 3000;
 // Create HTTP server
 const server = http.createServer(app);
 
-// Create WebSocket server
-const wss = new WebSocket.Server({ server });
+// Import stream client for StreamServer integration
+const { streamClient } = require('./routes/hearing');
+
+// Create StreamServer for handling Ozonetel stream connections
+const streamServer = new StreamServer(server, streamClient);
 
 // Middleware
 app.use(helmet({
@@ -71,98 +78,107 @@ app.get('/', (req, res) => {
       designer: '/api/designer',
       ivrExecuter: '/api/ivrexecuter', 
       hearing: '/api/hearing',
-      websocket: '/ws'
+      websocket: '/ws',
+      monitor: '/api/monitor'
     }
   });
 });
 
-// WebSocket connection handling
-wss.on('connection', (ws, req) => {
-  const clientId = require('uuid').v4();
-  ws.clientId = clientId;
-  
-  logger.info('WebSocket connection established', {
-    clientId: clientId,
-    ip: req.socket.remoteAddress,
-    userAgent: req.headers['user-agent']
-  });
-
-  // Send welcome message
-  ws.send(JSON.stringify({
-    type: 'connection',
-    message: 'Connected to VoxFlow WebSocket server',
-    clientId: clientId,
-    timestamp: new Date().toISOString()
-  }));
-
-  // Handle incoming messages
-  ws.on('message', (message) => {
+// Monitoring API route
+app.get('/api/monitor', (req, res) => {
+  try {
+    const uptime = process.uptime();
+    const memoryUsage = process.memoryUsage();
+    
+    // Get StreamServer status if available
+    let streamServerStatus = {
+      available: false,
+      activeConnections: 0,
+      connections: []
+    };
+    
+    if (streamServer) {
+      streamServerStatus = {
+        available: true,
+        ...streamServer.getStatus()
+      };
+    }
+    
+    // Get hearing service status
+    let hearingStatus = {
+      streamClientConnected: false,
+      streamingClientConnected: false,
+      activeSessions: 0
+    };
+    
     try {
-      const data = JSON.parse(message);
-      logger.info('WebSocket message received', {
-        clientId: clientId,
-        messageType: data.type || 'unknown',
-        dataSize: message.length
-      });
-
-      // Handle different message types
-      switch (data.type) {
-        case 'voice_stream':
-          handleVoiceStream(ws, data);
-          break;
-        case 'ping':
-          ws.send(JSON.stringify({ type: 'pong', timestamp: new Date().toISOString() }));
-          break;
-        default:
-          logger.warn('Unknown message type received', { 
-            clientId: clientId, 
-            type: data.type 
-          });
+      const { streamClient } = require('./routes/hearing');
+      if (streamClient) {
+        const status = streamClient.getStatus();
+        hearingStatus.streamClientConnected = status.connected || false;
+        hearingStatus.activeSessions = status.activeSessions || 0;
       }
-    } catch (error) {
-      logger.error('Error parsing WebSocket message', {
-        clientId: clientId,
-        error: error.message,
-        rawMessage: message.toString()
-      });
+    } catch (err) {
+      logger.warn('Could not get hearing service status', { error: err.message });
     }
-  });
-
-  // Handle connection close
-  ws.on('close', (code, reason) => {
-    logger.info('WebSocket connection closed', {
-      clientId: clientId,
-      code: code,
-      reason: reason.toString()
+    
+    const monitorData = {
+      server: {
+        status: 'running',
+        uptime: `${Math.floor(uptime / 60)}m ${Math.floor(uptime % 60)}s`,
+        uptimeSeconds: Math.floor(uptime),
+        pid: process.pid,
+        nodeVersion: process.version,
+        platform: process.platform,
+        environment: process.env.NODE_ENV || 'development',
+        timestamp: new Date().toISOString()
+      },
+      memory: {
+        rss: `${Math.round(memoryUsage.rss / 1024 / 1024)}MB`,
+        heapTotal: `${Math.round(memoryUsage.heapTotal / 1024 / 1024)}MB`,
+        heapUsed: `${Math.round(memoryUsage.heapUsed / 1024 / 1024)}MB`,
+        external: `${Math.round(memoryUsage.external / 1024 / 1024)}MB`
+      },
+      websockets: {
+        streamServer: streamServerStatus,
+        hearing: hearingStatus
+      },
+      endpoints: {
+        total: 5,
+        active: [
+          { path: '/api/designer', status: 'active' },
+          { path: '/api/ivrexecuter', status: 'active' },
+          { path: '/api/hearing', status: 'active' },
+          { path: '/flowJsonView', status: 'active' },
+          { path: '/ws', status: 'active', type: 'websocket' }
+        ]
+      },
+      health: {
+        status: 'healthy',
+        checks: {
+          server: 'ok',
+          memory: memoryUsage.heapUsed < memoryUsage.heapTotal * 0.9 ? 'ok' : 'warning',
+          websockets: streamServerStatus.available ? 'ok' : 'no_connections'
+        }
+      }
+    };
+    
+    res.json(monitorData);
+    
+    logger.info('Monitor API accessed', { 
+      connections: streamServerStatus.activeConnections,
+      uptime: Math.floor(uptime)
     });
-  });
-
-  // Handle errors
-  ws.on('error', (error) => {
-    logger.error('WebSocket error', {
-      clientId: clientId,
-      error: error.message,
-      stack: error.stack
+    
+  } catch (error) {
+    logger.error('Error in monitor API', { error: error.message });
+    res.status(500).json({
+      server: { status: 'error' },
+      error: 'Failed to retrieve monitoring data',
+      message: error.message
     });
-  });
+  }
 });
-
-// Handle voice streaming
-function handleVoiceStream(ws, data) {
-  logger.info('Voice stream data received', {
-    clientId: ws.clientId,
-    streamId: data.streamId,
-    dataSize: data.audioData ? data.audioData.length : 0
-  });
-
-  // Echo back confirmation (for now)
-  ws.send(JSON.stringify({
-    type: 'voice_stream_ack',
-    streamId: data.streamId,
-    timestamp: new Date().toISOString(),
-    status: 'received'
-  }));
-}
 
 // Error handling middleware
 app.use((err, req, res, next) => {
@@ -206,16 +222,16 @@ server.listen(port, () => {
     : `http://localhost:${port}`;
   
   console.log(`🚀 VoxFlow server running on port ${port}`);
-  console.log(`📡 WebSocket server ready`);
+  console.log(`📡 Stream WebSocket server ready at /ws (handled by StreamServer)`);
   console.log(`🎨 Designer: ${baseUrl}/api/designer`);
   console.log(`📞 IVR Executer: ${baseUrl}/api/ivrexecuter`);
   console.log(`🎧 Hearing: ${baseUrl}/api/hearing`);
-  console.log(`🔍 Flow JSON Viewer: ${baseUrl}/flowJsonView`);
+  console.log(`� Monitor: ${baseUrl}/api/monitor`);
+  console.log(`�🔍 Flow JSON Viewer: ${baseUrl}/flowJsonView`);
 });
 
 // Increase max listeners to prevent warning
 server.setMaxListeners(20);
-wss.setMaxListeners(20);
 
 // Graceful shutdown
 let isShuttingDown = false;
@@ -240,11 +256,11 @@ function gracefulShutdown(signal) {
   // Close servers
   Promise.all([
     new Promise((resolve) => {
-      wss.close((err) => {
-        if (err) logger.error('Error closing WebSocket server', { error: err.message });
-        else logger.info('WebSocket server closed');
-        resolve();
-      });
+      if (streamServer) {
+        console.log('Closing StreamServer...');
+        // StreamServer doesn't have a close method, but connections will close with server
+      }
+      resolve();
     }),
     new Promise((resolve) => {
       server.close((err) => {

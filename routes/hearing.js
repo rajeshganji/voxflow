@@ -4,6 +4,12 @@ const fs = require('fs').promises;
 const path = require('path');
 const logger = require('../utils/logger');
 
+// Import services for streaming integration
+const openaiService = require('../services/openaiService');
+const flowEngine = require('../services/flowEngine');
+const playbackService = require('../services/playbackService');
+const AudioProcessor = require('../services/audioProcessor');
+
 const router = express.Router();
 
 /**
@@ -13,7 +19,7 @@ const router = express.Router();
 class StreamClient {
     constructor(config = {}) {
         this.config = {
-            url: config.url || process.env.STREAM_WS_URL || 'ws://localhost:8080/ws',
+            url: config.url || process.env.STREAM_WS_URL || 'ws://localhost:3000/ws',
             reconnectInterval: config.reconnectInterval || 5000,
             logDir: config.logDir || path.join(__dirname, '../logs/stream'),
             ...config
@@ -597,15 +603,587 @@ class StreamClient {
     }
 }
 
+/**
+ * Streaming WebSocket Client for Real-time Audio Processing
+ * Handles continuous audio streams, real-time transcription, and TTS playback
+ */
+class StreamingClient {
+    constructor(config = {}) {
+        this.config = {
+            url: config.url || process.env.STREAMING_WS_URL || 'ws://localhost:3000/ws',
+            reconnectInterval: config.reconnectInterval || 3000,
+            openaiApiKey: process.env.OPENAI_API_KEY,
+            streamingBufferMs: config.streamingBufferMs || 2000, // 2 seconds buffer
+            silenceThreshold: config.silenceThreshold || 1000,   // 1 second silence
+            minSpeechDuration: config.minSpeechDuration || 1500,  // 1.5 seconds minimum
+            ...config
+        };
+        
+        this.ws = null;
+        this.isConnected = false;
+        this.reconnectTimer = null;
+        
+        // Active streaming sessions
+        this.streamingSessions = new Map(); // ucid -> session data
+        this.audioProcessors = new Map();   // ucid -> AudioProcessor
+        this.transcriptionBuffers = new Map(); // ucid -> accumulated transcription
+        this.playbackQueues = new Map();    // ucid -> playback queue
+        
+        // Streaming state
+        this.isTranscribing = new Map();    // ucid -> boolean
+        this.isPlayingBack = new Map();     // ucid -> boolean
+        
+        logger.info('StreamingClient initialized for real-time audio processing', {
+            url: this.config.url,
+            openaiEnabled: !!this.config.openaiApiKey,
+            bufferMs: this.config.streamingBufferMs
+        });
+    }
+
+    /**
+     * Initialize and connect to streaming server
+     */
+    async initialize() {
+        if (!this.config.openaiApiKey) {
+            throw new Error('OpenAI API key required for streaming transcription');
+        }
+        
+        logger.info('Starting streaming client...');
+        this.connect();
+    }
+
+    /**
+     * Connect to WebSocket server
+     */
+    connect() {
+        if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+            logger.info('StreamingClient already connected');
+            return;
+        }
+
+        logger.info('StreamingClient connecting to:', this.config.url);
+
+        try {
+            this.ws = new WebSocket(this.config.url);
+
+            this.ws.on('open', () => this.handleOpen());
+            this.ws.on('message', (data) => this.handleMessage(data));
+            this.ws.on('close', (code, reason) => this.handleClose(code, reason));
+            this.ws.on('error', (error) => this.handleError(error));
+
+        } catch (err) {
+            logger.error('StreamingClient connection error', { error: err.message });
+            this.scheduleReconnect();
+        }
+    }
+
+    /**
+     * Handle connection open
+     */
+    handleOpen() {
+        logger.info('StreamingClient connected to streaming server');
+        this.isConnected = true;
+        this.clearReconnectTimer();
+        
+        // Send client capabilities
+        this.send({
+            type: 'client_ready',
+            capabilities: {
+                realTimeTranscription: true,
+                ttsPlayback: true,
+                languages: ['en', 'hi', 'te', 'ta', 'kn', 'ml'],
+                bufferMs: this.config.streamingBufferMs
+            }
+        });
+    }
+
+    /**
+     * Handle incoming WebSocket messages
+     */
+    async handleMessage(data) {
+        try {
+            const message = JSON.parse(data.toString());
+            logger.debug('StreamingClient received event:', message.event || message.type);
+
+            switch (message.type || message.event) {
+                case 'stream_start':
+                    await this.handleStreamStart(message);
+                    break;
+                    
+                case 'audio_chunk':
+                case 'media':
+                    await this.handleAudioChunk(message);
+                    break;
+                    
+                case 'stream_end':
+                    await this.handleStreamEnd(message);
+                    break;
+                    
+                case 'control':
+                    await this.handleControl(message);
+                    break;
+                    
+                default:
+                    logger.warn('StreamingClient unknown message type:', message.type);
+            }
+            
+        } catch (err) {
+            logger.error('StreamingClient error processing message', { error: err.message });
+        }
+    }
+
+    /**
+     * Handle stream start event
+     */
+    async handleStreamStart(message) {
+        const { ucid, language = 'en', voice = 'alloy' } = message;
+        
+        logger.info('StreamingClient audio stream started', { ucid, language, voice });
+        
+        // Initialize streaming session
+        this.streamingSessions.set(ucid, {
+            ucid,
+            language,
+            voice,
+            startTime: Date.now(),
+            totalAudioMs: 0,
+            transcriptionChunks: 0,
+            playbackChunks: 0
+        });
+        
+        // Initialize audio processor for real-time processing
+        this.audioProcessors.set(ucid, new AudioProcessor(ucid, {
+            minAudioDuration: this.config.minSpeechDuration,
+            maxAudioDuration: this.config.streamingBufferMs * 2, // 4 seconds max
+            silenceThreshold: this.config.silenceThreshold,
+            silenceAmplitude: 300, // Higher threshold for streaming
+            sampleRate: 8000
+        }));
+        
+        // Initialize transcription buffer
+        this.transcriptionBuffers.set(ucid, {
+            partialText: '',
+            finalText: '',
+            language: language
+        });
+        
+        // Initialize playback queue
+        this.playbackQueues.set(ucid, []);
+        
+        // Reset state flags
+        this.isTranscribing.set(ucid, false);
+        this.isPlayingBack.set(ucid, false);
+        
+        logger.info('StreamingClient session initialized', { ucid });
+    }
+
+    /**
+     * Handle incoming audio chunks for real-time processing
+     */
+    async handleAudioChunk(message) {
+        const { ucid, data } = message;
+        const processor = this.audioProcessors.get(ucid);
+        const session = this.streamingSessions.get(ucid);
+        
+        if (!processor || !session) {
+            logger.warn('StreamingClient no session found for audio chunk:', ucid);
+            return;
+        }
+
+        // Extract audio samples
+        const { samples, sampleRate = 8000 } = data;
+        
+        if (!samples || samples.length === 0) {
+            return;
+        }
+
+        // Add samples to processor
+        processor.addSamples(samples, sampleRate);
+        session.totalAudioMs += (samples.length / sampleRate) * 1000;
+        
+        // Check if we should process this chunk for transcription
+        if (processor.shouldSendToAPI() && !this.isTranscribing.get(ucid)) {
+            await this.processAudioChunk(ucid);
+        }
+    }
+
+    /**
+     * Process audio chunk with OpenAI transcription
+     */
+    async processAudioChunk(ucid) {
+        const processor = this.audioProcessors.get(ucid);
+        const session = this.streamingSessions.get(ucid);
+        const buffer = this.transcriptionBuffers.get(ucid);
+        
+        if (!processor || !session || !buffer) {
+            logger.warn('StreamingClient missing components for transcription:', ucid);
+            return;
+        }
+
+        // Prevent concurrent transcriptions
+        if (this.isTranscribing.get(ucid)) {
+            logger.debug('StreamingClient transcription already in progress for', ucid);
+            return;
+        }
+
+        try {
+            this.isTranscribing.set(ucid, true);
+            
+            // Get WAV buffer from processor
+            const wavBuffer = processor.toWAVBuffer();
+            if (!wavBuffer) {
+                logger.warn('StreamingClient no WAV buffer generated for', ucid);
+                return;
+            }
+
+            const processorInfo = processor.getInfo();
+            logger.debug('StreamingClient processing audio chunk for transcription', {
+                ucid,
+                durationMs: processorInfo.durationMs,
+                samples: processorInfo.totalSamples,
+                language: session.language
+            });
+
+            // Validate audio quality
+            if (!this.validateAudioChunk(processor)) {
+                logger.debug('StreamingClient audio chunk validation failed - skipping');
+                processor.reset();
+                return;
+            }
+
+            // Transcribe with OpenAI
+            const transcriptionResult = await openaiService.speechToText(wavBuffer, session.language);
+            const text = transcriptionResult.text?.trim() || '';
+            const detectedLanguage = transcriptionResult.language || session.language;
+
+            logger.info('StreamingClient transcription received', {
+                ucid,
+                text: text.substring(0, 100),
+                language: detectedLanguage
+            });
+
+            // Filter out hallucinations and junk
+            if (!this.isValidTranscription(text)) {
+                logger.debug('StreamingClient filtered invalid transcription:', text);
+                processor.reset();
+                return;
+            }
+
+            // Update transcription buffer
+            if (buffer) {
+                buffer.finalText += (buffer.finalText ? ' ' : '') + text;
+                buffer.language = detectedLanguage;
+            }
+
+            logger.info('StreamingClient valid transcription:', text);
+
+            // Trigger immediate conversational response
+            if (text && !this.isPlayingBack.get(ucid)) {
+                await this.generateAndPlayResponse(ucid, text);
+            }
+            
+            // Reset processor for next chunk
+            processor.reset();
+            session.transcriptionChunks++;
+            
+        } catch (error) {
+            logger.error('StreamingClient error processing audio chunk', { ucid, error: error.message });
+        } finally {
+            this.isTranscribing.set(ucid, false);
+        }
+    }
+
+    /**
+     * Validate audio chunk quality before transcription
+     */
+    validateAudioChunk(processor) {
+        const info = processor.getInfo();
+        
+        // Check minimum duration
+        if (info.durationMs < 1000) {
+            return false;
+        }
+
+        // Check audio energy (RMS)
+        const samples = processor.samples;
+        const sum = samples.reduce((acc, s) => acc + (s * s), 0);
+        const rms = Math.sqrt(sum / samples.length);
+        
+        const MIN_RMS = 250; // Minimum energy threshold
+        if (rms < MIN_RMS) {
+            return false;
+        }
+        
+        return true;
+    }
+
+    /**
+     * Validate transcription text quality
+     */
+    isValidTranscription(text) {
+        if (!text || text.trim().length < 2) return false;
+        
+        // Filter common Whisper hallucinations
+        const hallucinations = [
+            /^thank you\.?$/i,
+            /^thanks\.?$/i,
+            /^you$/i,
+            /^\.{3,}$/,
+            /^\s*$/,
+            /^[\s\.,!?]+$/
+        ];
+        
+        return !hallucinations.some(pattern => pattern.test(text.trim()));
+    }
+
+    /**
+     * Generate AI response and play back via TTS
+     */
+    async generateAndPlayResponse(ucid, userText) {
+        const session = this.streamingSessions.get(ucid);
+        
+        if (!session || this.isPlayingBack.get(ucid)) {
+            logger.debug('StreamingClient skipping response - session not found or playback in progress');
+            return;
+        }
+
+        try {
+            this.isPlayingBack.set(ucid, true);
+            
+            logger.debug('StreamingClient generating conversational response', {
+                ucid,
+                userText: userText.substring(0, 80)
+            });
+
+            // Use flow engine for conversational response
+            const success = await flowEngine.executeConversationalFlow(
+                ucid,
+                userText,
+                {
+                    language: session.language,
+                    voice: session.voice
+                }
+            );
+
+            if (success) {
+                session.playbackChunks++;
+                logger.info('StreamingClient response played successfully', { ucid });
+            } else {
+                logger.error('StreamingClient failed to play response', { ucid });
+            }
+
+        } catch (error) {
+            logger.error('StreamingClient error generating response', { ucid, error: error.message });
+        } finally {
+            this.isPlayingBack.set(ucid, false);
+        }
+    }
+
+    /**
+     * Handle stream end event
+     */
+    async handleStreamEnd(message) {
+        const { ucid } = message;
+        
+        logger.info('StreamingClient ending audio stream for', ucid);
+        
+        // Get final session stats
+        const session = this.streamingSessions.get(ucid);
+        const buffer = this.transcriptionBuffers.get(ucid);
+        
+        if (session && buffer) {
+            const duration = Date.now() - session.startTime;
+            
+            logger.info('StreamingClient stream session summary', {
+                ucid,
+                duration: duration + 'ms',
+                totalAudioMs: session.totalAudioMs,
+                transcriptionChunks: session.transcriptionChunks,
+                playbackChunks: session.playbackChunks,
+                finalText: buffer.finalText.substring(0, 200)
+            });
+        }
+
+        // Cleanup session data
+        this.cleanupSession(ucid);
+    }
+
+    /**
+     * Handle control messages
+     */
+    async handleControl(message) {
+        const { ucid, command, params } = message;
+        
+        logger.info('StreamingClient control command', { ucid, command });
+        
+        switch (command) {
+            case 'set_language':
+                if (this.streamingSessions.has(ucid)) {
+                    this.streamingSessions.get(ucid).language = params.language;
+                    this.transcriptionBuffers.get(ucid).language = params.language;
+                    logger.info('StreamingClient language updated', { ucid, language: params.language });
+                }
+                break;
+                
+            case 'set_voice':
+                if (this.streamingSessions.has(ucid)) {
+                    this.streamingSessions.get(ucid).voice = params.voice;
+                    logger.info('StreamingClient voice updated', { ucid, voice: params.voice });
+                }
+                break;
+                
+            case 'pause_transcription':
+                this.isTranscribing.set(ucid, true); // Block new transcriptions
+                logger.info('StreamingClient transcription paused for', ucid);
+                break;
+                
+            case 'resume_transcription':
+                this.isTranscribing.set(ucid, false);
+                logger.info('StreamingClient transcription resumed for', ucid);
+                break;
+                
+            default:
+                logger.warn('StreamingClient unknown control command:', command);
+        }
+    }
+
+    /**
+     * Cleanup session data
+     */
+    cleanupSession(ucid) {
+        logger.debug('StreamingClient cleaning up session data for', ucid);
+        
+        // Clear audio processor
+        const processor = this.audioProcessors.get(ucid);
+        if (processor) {
+            processor.destroy();
+            this.audioProcessors.delete(ucid);
+        }
+        
+        // Clear all session data
+        this.streamingSessions.delete(ucid);
+        this.transcriptionBuffers.delete(ucid);
+        this.playbackQueues.delete(ucid);
+        this.isTranscribing.delete(ucid);
+        this.isPlayingBack.delete(ucid);
+    }
+
+    /**
+     * Send message to server
+     */
+    send(message) {
+        if (this.isConnected && this.ws?.readyState === WebSocket.OPEN) {
+            this.ws.send(JSON.stringify(message));
+            return true;
+        } else {
+            logger.error('StreamingClient cannot send message - not connected');
+            return false;
+        }
+    }
+
+    /**
+     * Handle connection close
+     */
+    handleClose(code, reason) {
+        logger.info('StreamingClient connection closed', { code, reason: reason?.toString() });
+        this.isConnected = false;
+        this.scheduleReconnect();
+    }
+
+    /**
+     * Handle connection error
+     */
+    handleError(error) {
+        logger.error('StreamingClient WebSocket error', { error: error.message });
+    }
+
+    /**
+     * Schedule reconnection
+     */
+    scheduleReconnect() {
+        if (this.reconnectTimer) return;
+        
+        logger.info('StreamingClient scheduling reconnection in', this.config.reconnectInterval, 'ms');
+        
+        this.reconnectTimer = setTimeout(() => {
+            this.reconnectTimer = null;
+            this.connect();
+        }, this.config.reconnectInterval);
+    }
+
+    /**
+     * Clear reconnection timer
+     */
+    clearReconnectTimer() {
+        if (this.reconnectTimer) {
+            clearTimeout(this.reconnectTimer);
+            this.reconnectTimer = null;
+        }
+    }
+
+    /**
+     * Get client status
+     */
+    getStatus() {
+        return {
+            connected: this.isConnected,
+            activeSessions: this.streamingSessions.size,
+            sessions: Array.from(this.streamingSessions.values()),
+            config: {
+                url: this.config.url,
+                bufferMs: this.config.streamingBufferMs,
+                silenceThreshold: this.config.silenceThreshold
+            }
+        };
+    }
+
+    /**
+     * Graceful shutdown
+     */
+    async shutdown() {
+        logger.info('StreamingClient shutting down...');
+        
+        // Clear reconnection timer
+        this.clearReconnectTimer();
+        
+        // Cleanup all sessions
+        for (const ucid of this.streamingSessions.keys()) {
+            this.cleanupSession(ucid);
+        }
+        
+        // Close WebSocket connection
+        if (this.ws) {
+            this.ws.close();
+            this.ws = null;
+        }
+        
+        this.isConnected = false;
+        logger.info('StreamingClient shutdown complete');
+    }
+}
+
 // Create global stream client instance
 const streamClient = new StreamClient({
     url: process.env.STREAM_WS_URL,
     logDir: path.join(__dirname, '../logs/stream')
 });
 
+// Create global streaming client instance
+const streamingClient = new StreamingClient({
+    url: process.env.STREAMING_WS_URL,
+    streamingBufferMs: parseInt(process.env.STREAMING_BUFFER_MS) || 2000,
+    silenceThreshold: parseInt(process.env.STREAMING_SILENCE_MS) || 1000,
+    minSpeechDuration: parseInt(process.env.MIN_SPEECH_DURATION) || 1500
+});
+
 // Initialize stream client on module load
 streamClient.initialize().catch(err => {
     logger.error('Failed to initialize stream client', { error: err.message });
+});
+
+// Initialize streaming client on module load
+streamingClient.initialize().catch(err => {
+    logger.error('Failed to initialize streaming client', { error: err.message });
 });
 
 // API Routes
@@ -614,6 +1192,7 @@ streamClient.initialize().catch(err => {
 router.get('/', (req, res) => {
     try {
         const status = streamClient.getStatus();
+        const streamingStatus = streamingClient.getStatus();
         const hearingInfo = {
             service: 'VoxFlow Hearing Service',
             description: 'Real-time audio streaming and transcription for KooKoo IVR',
@@ -623,15 +1202,26 @@ router.get('/', (req, res) => {
                 'Real-time transcription',
                 'Bi-directional audio streaming',
                 'Multi-language support',
-                'Call session management'
+                'Call session management',
+                'Streaming client for continuous processing'
             ],
             streamStatus: status,
+            streamingStatus: streamingStatus,
             endpoints: {
                 status: '/api/hearing/status',
                 language: '/api/hearing/language/:ucid/:language',
                 sendAudio: '/api/hearing/audio/:ucid',
                 clearBuffer: '/api/hearing/clear',
-                disconnect: '/api/hearing/disconnect'
+                disconnect: '/api/hearing/disconnect',
+                streamingStart: '/api/hearing/streaming/start',
+                streamingAudio: '/api/hearing/streaming/audio',
+                streamingEnd: '/api/hearing/streaming/end',
+                streamingStatus: '/api/hearing/streaming/status'
+            },
+            features: {
+                openaiEnabled: !!process.env.OPENAI_API_KEY,
+                elevenlabsEnabled: !!process.env.ELEVENLABS_API_KEY,
+                streamingEnabled: true
             }
         };
 
@@ -799,16 +1389,293 @@ router.post('/disconnect', (req, res) => {
 // Health check endpoint
 router.get('/health', (req, res) => {
     const status = streamClient.getStatus();
+    const streamingStatus = streamingClient.getStatus();
     
     res.json({
         service: 'VoxFlow Hearing Service',
         status: 'healthy',
         timestamp: new Date().toISOString(),
         streamConnected: status.connected,
-        activeCall: status.currentCall ? status.currentCall.ucid : null
+        activeCall: status.currentCall ? status.currentCall.ucid : null,
+        streamingClient: {
+            enabled: true,
+            connected: streamingStatus.connected,
+            activeSessions: streamingStatus.activeSessions
+        }
     });
 });
 
-// Export the router and stream client for testing
+// =============================================================================
+// STREAMING CLIENT API ENDPOINTS
+// =============================================================================
+
+// Start streaming session
+router.post('/streaming/start', (req, res) => {
+    try {
+        const { ucid, language = 'en', voice = 'alloy' } = req.body;
+
+        if (!ucid) {
+            return res.status(400).json({
+                success: false,
+                error: 'UCID is required'
+            });
+        }
+
+        // Send start streaming message to client
+        const sent = streamingClient.send({
+            type: 'stream_start',
+            ucid,
+            language,
+            voice,
+            timestamp: Date.now()
+        });
+
+        if (sent) {
+            res.json({
+                success: true,
+                message: 'Streaming session started',
+                ucid,
+                language,
+                voice
+            });
+        } else {
+            res.status(500).json({
+                success: false,
+                error: 'Failed to start streaming session - client not connected'
+            });
+        }
+
+        logger.info('Streaming session start requested', { ucid, language, voice });
+
+    } catch (error) {
+        logger.error('Error starting streaming session', { error: error.message });
+        res.status(500).json({
+            success: false,
+            error: 'Failed to start streaming session',
+            message: error.message
+        });
+    }
+});
+
+// Send audio chunk for real-time processing
+router.post('/streaming/audio', (req, res) => {
+    try {
+        const { ucid, samples, sampleRate = 8000, timestamp } = req.body;
+
+        if (!ucid || !samples) {
+            return res.status(400).json({
+                success: false,
+                error: 'UCID and samples are required'
+            });
+        }
+
+        // Send audio chunk to streaming client
+        const sent = streamingClient.send({
+            type: 'audio_chunk',
+            ucid,
+            data: {
+                samples,
+                sampleRate,
+                bitsPerSample: 16,
+                channelCount: 1,
+                numberOfFrames: samples.length,
+                timestamp: timestamp || Date.now()
+            }
+        });
+
+        if (sent) {
+            res.json({
+                success: true,
+                message: 'Audio chunk processed',
+                samples: samples.length
+            });
+        } else {
+            res.status(500).json({
+                success: false,
+                error: 'Failed to process audio chunk - client not connected'
+            });
+        }
+
+    } catch (error) {
+        logger.error('Error processing audio chunk', { error: error.message });
+        res.status(500).json({
+            success: false,
+            error: 'Failed to process audio chunk',
+            message: error.message
+        });
+    }
+});
+
+// End streaming session
+router.post('/streaming/end', (req, res) => {
+    try {
+        const { ucid } = req.body;
+
+        if (!ucid) {
+            return res.status(400).json({
+                success: false,
+                error: 'UCID is required'
+            });
+        }
+
+        // Send end streaming message to client
+        const sent = streamingClient.send({
+            type: 'stream_end',
+            ucid,
+            timestamp: Date.now()
+        });
+
+        if (sent) {
+            res.json({
+                success: true,
+                message: 'Streaming session ended',
+                ucid
+            });
+        } else {
+            res.status(500).json({
+                success: false,
+                error: 'Failed to end streaming session - client not connected'
+            });
+        }
+
+        logger.info('Streaming session end requested', { ucid });
+
+    } catch (error) {
+        logger.error('Error ending streaming session', { error: error.message });
+        res.status(500).json({
+            success: false,
+            error: 'Failed to end streaming session',
+            message: error.message
+        });
+    }
+});
+
+// Set language for streaming session
+router.post('/streaming/language', (req, res) => {
+    try {
+        const { ucid, language } = req.body;
+
+        if (!ucid || !language) {
+            return res.status(400).json({
+                success: false,
+                error: 'UCID and language are required'
+            });
+        }
+
+        // Send language control message
+        const sent = streamingClient.send({
+            type: 'control',
+            ucid,
+            command: 'set_language',
+            params: { language }
+        });
+
+        if (sent) {
+            res.json({
+                success: true,
+                message: 'Language updated',
+                ucid,
+                language
+            });
+        } else {
+            res.status(500).json({
+                success: false,
+                error: 'Failed to update language - client not connected'
+            });
+        }
+
+        logger.info('Streaming language updated', { ucid, language });
+
+    } catch (error) {
+        logger.error('Error updating streaming language', { error: error.message });
+        res.status(500).json({
+            success: false,
+            error: 'Failed to update language',
+            message: error.message
+        });
+    }
+});
+
+// Get streaming client status
+router.get('/streaming/status', (req, res) => {
+    try {
+        const status = streamingClient.getStatus();
+
+        res.json({
+            success: true,
+            enabled: true,
+            ...status
+        });
+
+    } catch (error) {
+        logger.error('Error getting streaming status', { error: error.message });
+        res.status(500).json({
+            success: false,
+            error: 'Failed to get streaming status',
+            message: error.message
+        });
+    }
+});
+
+// Control streaming transcription (pause/resume)
+router.post('/streaming/control', (req, res) => {
+    try {
+        const { ucid, command, params = {} } = req.body;
+
+        if (!ucid || !command) {
+            return res.status(400).json({
+                success: false,
+                error: 'UCID and command are required'
+            });
+        }
+
+        // Valid commands
+        const validCommands = ['pause_transcription', 'resume_transcription', 'set_voice'];
+        
+        if (!validCommands.includes(command)) {
+            return res.status(400).json({
+                success: false,
+                error: 'Invalid command',
+                validCommands
+            });
+        }
+
+        // Send control message
+        const sent = streamingClient.send({
+            type: 'control',
+            ucid,
+            command,
+            params
+        });
+
+        if (sent) {
+            res.json({
+                success: true,
+                message: `Command '${command}' sent successfully`,
+                ucid,
+                command,
+                params
+            });
+        } else {
+            res.status(500).json({
+                success: false,
+                error: 'Failed to send control command - client not connected'
+            });
+        }
+
+        logger.info('Streaming control command sent', { ucid, command, params });
+
+    } catch (error) {
+        logger.error('Error sending streaming control command', { error: error.message });
+        res.status(500).json({
+            success: false,
+            error: 'Failed to send control command',
+            message: error.message
+        });
+    }
+});
+
+// Export the router and clients for testing
 module.exports = router;
 module.exports.streamClient = streamClient;
+module.exports.streamingClient = streamingClient;

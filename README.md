@@ -1,35 +1,78 @@
 # VoxFlow
 
-VoxFlow is an IVR (Interactive Voice Response) application with a visual drag-drop designer and real-time voice streaming capabilities.
+VoxFlow is an advanced IVR (Interactive Voice Response) application with a visual drag-drop designer, real-time voice streaming, and AI-powered conversational capabilities.
 
-## Features
+## 🚀 Features
 
 - 🎨 **Visual Flow Designer**: Drag-and-drop interface for building IVR flows
 - 📞 **Kookoo Integration**: Built-in support for Kookoo XML response format
-- 🔊 **Voice Streaming**: Real-time voice streaming via WebSockets
-- 🛠️ **API Endpoints**: RESTful APIs for designer, IVR execution, and voice handling
-- 📋 **Comprehensive Logging**: Detailed logging for all operations
+- 🔊 **Real-time Voice Streaming**: Bi-directional audio streaming via WebSockets
+- 🤖 **AI-Powered Conversations**: OpenAI integration for speech recognition and response generation
+- 🎙️ **Advanced TTS**: ElevenLabs integration for high-quality text-to-speech
+- 🌍 **Multi-language Support**: English, Hindi, Telugu, Tamil, Kannada, Malayalam
+- 🛠️ **RESTful APIs**: Comprehensive APIs for designer, IVR execution, and voice handling
+- 📋 **Comprehensive Logging**: Detailed logging with Winston framework
+- ⚡ **Real-time Processing**: Low-latency audio processing pipeline
 
-## Quick Start
+## 🎯 New: Streaming Client
+
+VoxFlow now includes a powerful streaming client for real-time audio processing with OpenAI transcription and TTS playback. Perfect for live phone conversations with AI agents.
+
+### Key Streaming Features:
+- **Real-time Transcription**: Live speech-to-text using OpenAI Whisper
+- **Intelligent Response Generation**: Context-aware AI responses
+- **Quality Audio Filtering**: Advanced filtering to prevent hallucinations
+- **Concurrent Session Management**: Handle multiple calls simultaneously
+- **Automatic Language Detection**: Support for multiple Indian languages
+- **Graceful Reconnection**: Robust connection handling with auto-retry
+
+[📖 Read the complete Streaming Client Documentation](./docs/STREAMING_CLIENT.md)
+
+## 🚀 Quick Start
+
+### Standard Setup
 
 1. **Install Dependencies**
    ```bash
    npm install
    ```
 
-2. **Start the Server**
+2. **Configure Environment**
+   ```bash
+   cp .env.example .env
+   # Edit .env with your configurations
+   ```
+
+3. **Start the Server**
    ```bash
    npm start
    # or for development with auto-reload
    npm run dev
    ```
 
-3. **Access the Application**
-   - **Designer Interface**: http://localhost:3000
-   - **API Documentation**: http://localhost:3000 (shows available endpoints)
-   - **WebSocket**: ws://localhost:3000
+### Streaming Client Setup
 
-## API Endpoints
+1. **Enable Streaming Features**
+   ```bash
+   cp .env.streaming.example .env
+   # Add your OpenAI and ElevenLabs API keys
+   ```
+
+2. **Test Streaming Client**
+   ```bash
+   # Test HTTP API
+   node scripts/test-streaming-api.js
+   
+   # Test WebSocket client
+   node scripts/test-streaming.js
+   ```
+
+3. **Access Applications**
+   - **Designer Interface**: http://localhost:3000
+   - **API Documentation**: http://localhost:3000
+   - **Streaming Status**: http://localhost:3000/api/hearing/streaming/status
+
+## 📡 API Endpoints
 
 ### Designer API (`/api/designer`)
 - `GET /api/designer` - Designer interface info
@@ -49,6 +92,14 @@ VoxFlow is an IVR (Interactive Voice Response) application with a visual drag-dr
 - `DELETE /api/hearing/unregister/:clientId` - Unregister client
 - `GET /api/hearing/status/:clientId` - Get client status
 - `POST /api/hearing/test` - Test voice streaming
+
+### 🆕 Streaming API (`/api/hearing/streaming/*`)
+- `GET /streaming/status` - Get streaming client status
+- `POST /streaming/start` - Start streaming session
+- `POST /streaming/audio` - Send audio chunk for processing
+- `POST /streaming/language` - Update transcription language
+- `POST /streaming/control` - Send control commands
+- `POST /streaming/end` - End streaming session
 
 ## WebSocket Events
 
