@@ -436,9 +436,11 @@ class StreamServer {
 
             // Forward to StreamClient message handler
             if (this.streamClient) {
+                console.log(`🔄 [STREAM-FORWARD] Forwarding ${message.event || 'unknown'} event to StreamClient`);
                 this.streamClient.handleMessage(data);
+                console.log(`✅ [STREAM-FORWARD] Message forwarded to StreamClient successfully`);
             } else {
-                console.warn('[StreamServer] ⚠️ No StreamClient available to handle message!');
+                console.warn('⚠️ [STREAM-FORWARD] No StreamClient available to handle message!');
             }
 
         } catch (err) {

@@ -125,26 +125,33 @@ class StreamClient {
     async handleMessage(data) {
         try {
             const message = JSON.parse(data.toString());
+            console.log(`📨 [STREAM-CLIENT] Received ${message.event || message.type || 'unknown'} event - UCID: ${message.ucid || 'N/A'}`);
+            
             logger.debug('Stream message received', { event: message.event, type: message.type });
 
             switch (message.event) {
                 case 'start':
+                    console.log(`🚀 [STREAM-CLIENT] Processing START event for UCID: ${message.ucid}`);
                     await this.handleStartEvent(message);
                     break;
                 
                 case 'media':
+                    console.log(`🎵 [STREAM-CLIENT] Processing MEDIA event for UCID: ${message.ucid} (${message.data?.numberOfFrames} frames)`);
                     await this.handleMediaEvent(message);
                     break;
                 
                 case 'stop':
+                    console.log(`⏹️ [STREAM-CLIENT] Processing STOP event for UCID: ${message.ucid}`);
                     await this.handleStopEvent(message);
                     break;
                 
                 default:
+                    console.log(`❓ [STREAM-CLIENT] Unknown event: ${message.event || message.type} for UCID: ${message.ucid}`);
                     logger.warn('Unknown stream event', { event: message.event });
                     await this.logEvent('unknown', message);
             }
         } catch (err) {
+            console.error(`❌ [STREAM-CLIENT] Error processing message: ${err.message}`);
             logger.error('Error processing stream message', { 
                 error: err.message,
                 stack: err.stack,
@@ -159,6 +166,7 @@ class StreamClient {
     async handleStartEvent(message) {
         const { ucid, did } = message;
         
+        console.log(`🚀 [START-EVENT] New call started - UCID: ${ucid}, DID: ${did}`);
         logger.info('Call started', { ucid, did });
 
         this.currentCall = {
@@ -171,6 +179,7 @@ class StreamClient {
 
         // Initialize audio buffer for this call
         this.audioBuffers.set(ucid, []);
+        console.log(`📦 [START-EVENT] Audio buffer initialized for UCID: ${ucid}`);
         
         // Initialize transcription session
         const defaultLanguage = process.env.DEFAULT_TRANSCRIPTION_LANGUAGE || 'en';
@@ -183,6 +192,7 @@ class StreamClient {
             language: defaultLanguage
         });
         
+        console.log(`🎤 [START-EVENT] Transcription session created for UCID: ${ucid}, language: ${defaultLanguage}`);
         logger.info('Transcription session created', { ucid, language: defaultLanguage });
 
         await this.logEvent('start', message);
@@ -193,8 +203,11 @@ class StreamClient {
      */
     async handleMediaEvent(message) {
         const { ucid, data } = message;
+        
+        console.log(`🎵 [MEDIA-EVENT] UCID: ${ucid}, frames: ${data?.numberOfFrames}, rate: ${data?.sampleRate}Hz`);
 
         if (!this.currentCall || this.currentCall.ucid !== ucid) {
+            console.warn(`⚠️ [MEDIA-EVENT] Received media for unknown call: ${ucid}, current call: ${this.currentCall?.ucid}`);
             logger.warn('Received media for unknown call', { ucid });
             return;
         }
@@ -204,6 +217,7 @@ class StreamClient {
         // Check if this is the first packet (16kHz - should be ignored)
         if (!this.currentCall.firstMediaReceived) {
             if (sampleRate === 16000) {
+                console.log(`🚫 [MEDIA-EVENT] Ignoring first 16kHz packet for ${ucid}`);
                 logger.debug('First media packet ignored', { ucid, sampleRate, numberOfFrames });
                 this.currentCall.firstMediaReceived = true;
                 await this.logEvent('media_first_ignored', { ucid, sampleRate, numberOfFrames });
@@ -215,6 +229,8 @@ class StreamClient {
         // Process subsequent packets (8kHz)
         if (sampleRate === 8000) {
             this.currentCall.mediaPackets++;
+            
+            console.log(`✅ [MEDIA-PROCESSED] UCID: ${ucid}, packet #${this.currentCall.mediaPackets}, samples: ${samples?.length || 0}`);
             
             // Store audio samples
             const buffer = this.audioBuffers.get(ucid);
@@ -232,11 +248,13 @@ class StreamClient {
 
             // Process audio for transcription periodically
             if (this.currentCall.mediaPackets % 50 === 0 && samples && samples.length > 0) {
+                console.log(`🎤 [TRANSCRIPTION] Processing audio for UCID: ${ucid}, packet #${this.currentCall.mediaPackets}`);
                 await this.processAudioForTranscription(ucid, samples, sampleRate);
             }
 
             // Log every 100th packet
             if (this.currentCall.mediaPackets % 100 === 0) {
+                console.log(`📊 [MEDIA-STATS] UCID: ${ucid}, total packets: ${this.currentCall.mediaPackets}`);
                 logger.debug('Media packets received', { 
                     ucid, 
                     packetNumber: this.currentCall.mediaPackets,
@@ -254,6 +272,8 @@ class StreamClient {
                     samplesCount: samples.length
                 });
             }
+        } else {
+            console.warn(`⚠️ [MEDIA-EVENT] Unexpected sample rate: ${sampleRate}Hz for UCID: ${ucid}`);
         }
     }
 
