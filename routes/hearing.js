@@ -18,8 +18,13 @@ const router = express.Router();
  */
 class StreamClient {
     constructor(config = {}) {
+        // Smart WebSocket URL detection based on environment
+        const defaultPort = process.env.NODE_ENV === 'production' ? 8080 : 3000;
+        const serverPort = process.env.PORT || defaultPort;
+        const defaultWsUrl = `ws://localhost:${serverPort}/ws`;
+        
         this.config = {
-            url: config.url || process.env.STREAM_WS_URL || 'ws://localhost:3000/ws',
+            url: config.url || process.env.STREAM_WS_URL || defaultWsUrl,
             reconnectInterval: config.reconnectInterval || 5000,
             logDir: config.logDir || path.join(__dirname, '../logs/stream'),
             ...config
@@ -609,8 +614,13 @@ class StreamClient {
  */
 class StreamingClient {
     constructor(config = {}) {
+        // Smart WebSocket URL detection based on environment
+        const defaultPort = process.env.NODE_ENV === 'production' ? 8080 : 3000;
+        const serverPort = process.env.PORT || defaultPort;
+        const defaultWsUrl = `ws://localhost:${serverPort}/ws`;
+        
         this.config = {
-            url: config.url || process.env.STREAMING_WS_URL || 'ws://localhost:3000/ws',
+            url: config.url || process.env.STREAMING_WS_URL || defaultWsUrl,
             reconnectInterval: config.reconnectInterval || 3000,
             openaiApiKey: process.env.OPENAI_API_KEY,
             streamingBufferMs: config.streamingBufferMs || 2000, // 2 seconds buffer

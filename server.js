@@ -13,13 +13,17 @@ const designerRoutes = require('./routes/designer');
 const ivrExecuterRoutes = require('./routes/ivrexecuter');
 const hearingRoutes = require('./routes/hearing');
 const flowViewRoutes = require('./routes/flowview');
+const ivrFlowRoutes = require('./routes/ivrflow');
 
 // Import logger and StreamServer
 const logger = require('./utils/logger');
 const StreamServer = require('./services/streamServer');
 
 const app = express();
-const port = process.env.PORT || 3000;
+
+// Smart port detection: 8080 for production (realway.com), 3000 for local development
+const defaultPort = process.env.NODE_ENV === 'production' ? 8080 : 3000;
+const port = process.env.PORT || defaultPort;
 
 // Create HTTP server
 const server = http.createServer(app);
@@ -67,6 +71,7 @@ app.use((req, res, next) => {
 app.use('/api/designer', designerRoutes);
 app.use('/api/ivrexecuter', ivrExecuterRoutes);
 app.use('/api/hearing', hearingRoutes);
+app.use('/api/ivrflow', ivrFlowRoutes);
 app.use('/flowJsonView', flowViewRoutes);
 
 // Root route
@@ -78,6 +83,7 @@ app.get('/', (req, res) => {
       designer: '/api/designer',
       ivrExecuter: '/api/ivrexecuter', 
       hearing: '/api/hearing',
+      ivrFlow: '/api/ivrflow',
       websocket: '/ws',
       monitor: '/api/monitor'
     }
@@ -144,11 +150,12 @@ app.get('/api/monitor', (req, res) => {
         hearing: hearingStatus
       },
       endpoints: {
-        total: 5,
+        total: 6,
         active: [
           { path: '/api/designer', status: 'active' },
           { path: '/api/ivrexecuter', status: 'active' },
           { path: '/api/hearing', status: 'active' },
+          { path: '/api/ivrflow', status: 'active' },
           { path: '/flowJsonView', status: 'active' },
           { path: '/ws', status: 'active', type: 'websocket' }
         ]
@@ -226,8 +233,9 @@ server.listen(port, () => {
   console.log(`🎨 Designer: ${baseUrl}/api/designer`);
   console.log(`📞 IVR Executer: ${baseUrl}/api/ivrexecuter`);
   console.log(`🎧 Hearing: ${baseUrl}/api/hearing`);
-  console.log(`� Monitor: ${baseUrl}/api/monitor`);
-  console.log(`�🔍 Flow JSON Viewer: ${baseUrl}/flowJsonView`);
+  console.log(`🔄 IVR Flow: ${baseUrl}/api/ivrflow`);
+  console.log(`📊 Monitor: ${baseUrl}/api/monitor`);
+  console.log(`� Flow JSON Viewer: ${baseUrl}/flowJsonView`);
 });
 
 // Increase max listeners to prevent warning
