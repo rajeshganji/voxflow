@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VoxFlow - IVR Management System</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .welcome-container {
+            background: white;
+            padding: 60px;
+            border-radius: 20px;
+            text-align: center;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            max-width: 500px;
+            width: 90%;
+        }
+        
+        .logo {
+            font-size: 48px;
+            margin-bottom: 20px;
+        }
+        
+        h1 {
+            color: #2c3e50;
+            font-size: 32px;
+            margin-bottom: 16px;
+        }
+        
+        .subtitle {
+            color: #7f8c8d;
+            font-size: 18px;
+            margin-bottom: 40px;
+        }
+        
+        .features {
+            text-align: left;
+            margin-bottom: 40px;
+        }
+        
+        .feature {
+            display: flex;
+            align-items: center;
+            margin-bottom: 12px;
+            color: #2c3e50;
+        }
+        
+        .feature-icon {
+            margin-right: 12px;
+            font-size: 20px;
+        }
+        
+        .cta-buttons {
+            display: flex;
+            gap: 15px;
+            justify-content: center;
+        }
+        
+        .btn {
+            padding: 15px 30px;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            transition: all 0.3s ease;
+            cursor: pointer;
+        }
+        
+        .btn-primary {
+            background: #3498db;
+            color: white;
+        }
+        
+        .btn-primary:hover {
+            background: #2980b9;
+            transform: translateY(-2px);
+        }
+        
+        .btn-secondary {
+            background: transparent;
+            color: #3498db;
+            border: 2px solid #3498db;
+        }
+        
+        .btn-secondary:hover {
+            background: #3498db;
+            color: white;
+        }
+        
+        .loading {
+            color: #7f8c8d;
+            font-size: 14px;
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="welcome-container">
+        <div class="logo">🎯</div>
+        <h1>VoxFlow</h1>
+        <p class="subtitle">Build powerful IVR flows with drag-drop simplicity</p>
+        
+        <div class="features">
+            <div class="feature">
+                <span class="feature-icon">🎨</span>
+                Visual drag-drop flow designer
+            </div>
+            <div class="feature">
+                <span class="feature-icon">�</span>
+                Kookoo IVR integration
+            </div>
+            <div class="feature">
+                <span class="feature-icon">🔊</span>
+                Real-time voice streaming
+            </div>
+            <div class="feature">
+                <span class="feature-icon">💾</span>
+                Flow management & caching
+            </div>
+        </div>
+        
+        <div class="cta-buttons">
+            <a href="/flows.html" class="btn btn-primary">
+                � View Flows
+            </a>
+            <a href="/designer.html" class="btn btn-secondary">
+                ➕ New Flow
+            </a>
+        </div>
+        
+        <div class="loading">
+            Redirecting to flows page...
+        </div>
+    </div>
+
+    <script>
+        // Auto-redirect to flows page after 2 seconds
+        setTimeout(() => {
+            window.location.href = '/flows.html';
+        }, 2000);
+        
+        // Allow immediate navigation via clicks
+        document.addEventListener('DOMContentLoaded', () => {
+            console.log('VoxFlow welcome page loaded');
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,427 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VoxFlow - IVR Flows</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #f5f7fa;
+            color: #333;
+        }
+        
+        .header {
+            background: white;
+            padding: 20px 30px;
+            border-bottom: 1px solid #e0e6ed;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .header h1 {
+            color: #2c3e50;
+            font-size: 28px;
+            font-weight: 600;
+        }
+        
+        .header .subtitle {
+            color: #7f8c8d;
+            font-size: 14px;
+            margin-top: 4px;
+        }
+        
+        .actions {
+            display: flex;
+            gap: 15px;
+        }
+        
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            transition: all 0.2s ease;
+        }
+        
+        .btn-primary {
+            background: #3498db;
+            color: white;
+        }
+        
+        .btn-primary:hover {
+            background: #2980b9;
+            transform: translateY(-1px);
+        }
+        
+        .btn-secondary {
+            background: #ecf0f1;
+            color: #2c3e50;
+            border: 1px solid #bdc3c7;
+        }
+        
+        .btn-secondary:hover {
+            background: #d5dbdb;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 30px;
+        }
+        
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        
+        .stat-card {
+            background: white;
+            padding: 20px;
+            border-radius: 12px;
+            border: 1px solid #e0e6ed;
+            text-align: center;
+        }
+        
+        .stat-value {
+            font-size: 32px;
+            font-weight: 700;
+            color: #3498db;
+            margin-bottom: 8px;
+        }
+        
+        .stat-label {
+            color: #7f8c8d;
+            font-size: 14px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .flows-section {
+            background: white;
+            border-radius: 12px;
+            border: 1px solid #e0e6ed;
+            overflow: hidden;
+        }
+        
+        .section-header {
+            padding: 20px 30px;
+            border-bottom: 1px solid #e0e6ed;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .section-title {
+            font-size: 18px;
+            font-weight: 600;
+            color: #2c3e50;
+        }
+        
+        .search-box {
+            padding: 8px 15px;
+            border: 1px solid #bdc3c7;
+            border-radius: 6px;
+            font-size: 14px;
+            width: 250px;
+        }
+        
+        .flows-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        
+        .flows-table th,
+        .flows-table td {
+            padding: 15px 30px;
+            text-align: left;
+            border-bottom: 1px solid #f8f9fa;
+        }
+        
+        .flows-table th {
+            background: #f8f9fa;
+            font-weight: 600;
+            color: #2c3e50;
+            font-size: 13px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .flows-table tr:hover {
+            background: #f8f9fa;
+        }
+        
+        .flow-name {
+            font-weight: 600;
+            color: #2c3e50;
+            cursor: pointer;
+        }
+        
+        .flow-name:hover {
+            color: #3498db;
+        }
+        
+        .flow-description {
+            color: #7f8c8d;
+            font-size: 13px;
+            margin-top: 4px;
+        }
+        
+        .status-badge {
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 500;
+            text-transform: uppercase;
+        }
+        
+        .status-draft {
+            background: #fff3cd;
+            color: #856404;
+        }
+        
+        .status-active {
+            background: #d4edda;
+            color: #155724;
+        }
+        
+        .flow-actions {
+            display: flex;
+            gap: 8px;
+        }
+        
+        .action-btn {
+            padding: 6px 10px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+            background: #ecf0f1;
+            color: #2c3e50;
+        }
+        
+        .action-btn:hover {
+            background: #d5dbdb;
+        }
+        
+        .action-btn.delete {
+            background: #fadbd8;
+            color: #c0392b;
+        }
+        
+        .action-btn.delete:hover {
+            background: #f1948a;
+        }
+        
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: #7f8c8d;
+        }
+        
+        .empty-state-icon {
+            font-size: 48px;
+            margin-bottom: 16px;
+        }
+        
+        .empty-state h3 {
+            margin-bottom: 8px;
+            color: #2c3e50;
+        }
+        
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #7f8c8d;
+        }
+        
+        .spinner {
+            width: 40px;
+            height: 40px;
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #3498db;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 16px;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.5);
+        }
+        
+        .modal-content {
+            background-color: white;
+            margin: 15% auto;
+            padding: 30px;
+            border-radius: 12px;
+            width: 400px;
+            max-width: 90%;
+            position: relative;
+        }
+        
+        .modal h3 {
+            margin-bottom: 20px;
+            color: #2c3e50;
+        }
+        
+        .form-group {
+            margin-bottom: 15px;
+        }
+        
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: 500;
+            color: #2c3e50;
+        }
+        
+        .form-group input,
+        .form-group textarea {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #bdc3c7;
+            border-radius: 6px;
+            font-size: 14px;
+        }
+        
+        .form-group textarea {
+            resize: vertical;
+            min-height: 80px;
+        }
+        
+        .modal-actions {
+            display: flex;
+            gap: 10px;
+            justify-content: flex-end;
+            margin-top: 20px;
+        }
+        
+        .ws-status {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background: white;
+            padding: 10px 15px;
+            border-radius: 8px;
+            border: 1px solid #e0e6ed;
+            font-size: 12px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        
+        .ws-status.connected {
+            border-color: #27ae60;
+            color: #27ae60;
+        }
+        
+        .ws-status.disconnected {
+            border-color: #e74c3c;
+            color: #e74c3c;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div>
+            <h1>🎯 VoxFlow</h1>
+            <div class="subtitle">IVR Flow Management System</div>
+        </div>
+        <div class="actions">
+            <button class="btn btn-secondary" id="refreshBtn">
+                🔄 Refresh
+            </button>
+            <button class="btn btn-primary" id="newFlowBtn">
+                ➕ New Flow
+            </button>
+        </div>
+    </div>
+
+    <div class="container">
+        <!-- Statistics Cards -->
+        <div class="stats-grid" id="statsGrid">
+            <div class="stat-card">
+                <div class="stat-value" id="totalFlows">-</div>
+                <div class="stat-label">Total Flows</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="activeFlows">-</div>
+                <div class="stat-label">Active Flows</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="draftFlows">-</div>
+                <div class="stat-label">Draft Flows</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="totalNodes">-</div>
+                <div class="stat-label">Total Nodes</div>
+            </div>
+        </div>
+
+        <!-- Flows Table -->
+        <div class="flows-section">
+            <div class="section-header">
+                <h2 class="section-title">Your IVR Flows</h2>
+                <input type="text" class="search-box" placeholder="Search flows..." id="searchBox">
+            </div>
+            
+            <div id="flowsContent">
+                <div class="loading">
+                    <div class="spinner"></div>
+                    <div>Loading flows...</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- New Flow Modal -->
+    <div id="newFlowModal" class="modal">
+        <div class="modal-content">
+            <span class="close" style="position: absolute; top: 15px; right: 20px; font-size: 28px; font-weight: bold; cursor: pointer; color: #aaa;">&times;</span>
+            <h3>Create New IVR Flow</h3>
+            <div class="form-group">
+                <label for="flowName">Flow Name</label>
+                <input type="text" id="flowName" placeholder="Enter flow name">
+            </div>
+            <div class="form-group">
+                <label for="flowDescription">Description (Optional)</label>
+                <textarea id="flowDescription" placeholder="Describe your IVR flow"></textarea>
+            </div>
+            <div class="modal-actions">
+                <button class="btn btn-secondary" id="cancelBtn">Cancel</button>
+                <button class="btn btn-primary" id="createFlowBtn">Create Flow</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- WebSocket Status -->
+    <div class="ws-status" id="wsStatus">Connecting...</div>
+
+    <script src="/js/flows.js"></script>
+</body>
+</html>
