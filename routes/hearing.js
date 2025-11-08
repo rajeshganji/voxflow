@@ -213,7 +213,17 @@ class StreamClient {
             isSpeaking: false
         });
         
+        // Initialize AudioProcessor for this call
+        this.audioProcessors.set(ucid, new AudioProcessor(ucid, {
+            minAudioDuration: 1500,  // 1.5 seconds minimum
+            maxAudioDuration: 5000,  // 5 seconds maximum  
+            silenceThreshold: 1000,  // 1 second silence
+            silenceAmplitude: 300,   // RMS threshold for speech detection
+            sampleRate: 8000
+        }));
+        
         console.log(`🎤 [START-EVENT] Transcription session created for UCID: ${ucid}, language: ${defaultLanguage}`);
+        console.log(`🔧 [START-EVENT] AudioProcessor created for UCID: ${ucid}`);
         logger.info('Transcription session created', { ucid, language: defaultLanguage });
 
         await this.logEvent('start', message);
@@ -580,6 +590,14 @@ class StreamClient {
             // Clean up flags
             this.transcriptionInProgress.delete(ucid);
             this.playbackInProgress.delete(ucid);
+
+            // Cleanup AudioProcessor
+            const processor = this.audioProcessors.get(ucid);
+            if (processor) {
+                processor.destroy();
+                this.audioProcessors.delete(ucid);
+                console.log(`🧹 [CLEANUP] AudioProcessor destroyed for UCID: ${ucid}`);
+            }
 
             // Save audio buffer to file
             await this.saveAudioBuffer(ucid);
